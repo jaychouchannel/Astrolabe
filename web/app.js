@@ -84,6 +84,7 @@ function renderAccount() {
   const hasPrivate = state.private;
   $("#account-guide").classList.toggle("hidden", hasPrivate);
   $("#account-data").classList.toggle("hidden", !hasPrivate);
+  if (hasPrivate && state.pnlChart) state.pnlChart.resize();
   if (!hasPrivate) return;
   const eq = state.balance ? parseFloat(state.balance.eq) : null;
   $("#equity").textContent = eq != null ? fmt(eq) + " USDT" : "—";
@@ -110,6 +111,61 @@ function renderAlerts() {
   ).join("") || `<li class="muted">尚无异动</li>`;
 }
 
+/* ---------- pnl curve ---------- */
+function initPnlChart() {
+  const el = $("#pnl-chart");
+  state.pnlChart = echarts.init(el, "dark");
+  window.addEventListener("resize", () => state.pnlChart.resize());
+  fetch("/api/pnl").then(r => r.json()).then(points => {
+    state.pnlData = (points || []).map(p => [p[0] * 1000, p[1]]);
+    drawPnlChart();
+  });
+}
+
+function drawPnlChart() {
+  const data = state.pnlData || [];
+  if (!data.length) return;
+  const values = data.map(p => p[1]);
+  state.pnlChart.setOption({
+    backgroundColor: "transparent",
+    grid: { left: 55, right: 12, top: 12, bottom: 22 },
+    xAxis: {
+      type: "time",
+      axisLabel: { color: "#6b7694", fontSize: 10, formatter: v => new Date(v).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value", scale: true,
+      axisLabel: { color: "#6b7694", fontSize: 10 },
+      splitLine: { lineStyle: { color: "#1c2540" } },
+    },
+    tooltip: {
+      trigger: "axis",
+      formatter: ps => `${new Date(ps[0].value[0]).toLocaleString("zh-CN")}<br/>权益: ${fmt(ps[0].value[1])} USDT`,
+    },
+    series: [{
+      type: "line", data, showSymbol: false, smooth: true,
+      lineStyle: { color: "#7aa2f7", width: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: "#7aa2f744" }, { offset: 1, color: "#7aa2f700" },
+        ]),
+      },
+    }],
+  }, { notMerge: true });
+}
+
+function pushPnlPoint(equity) {
+  if (!equity || equity <= 0) return;
+  if (!state.pnlData) state.pnlData = [];
+  const now = Date.now();
+  const last = state.pnlData.at(-1);
+  if (last && now - last[0] < 5000) state.pnlData.pop(); // throttle to 1 point / 5s
+  state.pnlData.push([now, equity]);
+  if (state.pnlData.length > 500) state.pnlData.shift();
+  drawPnlChart();
+}
+
 /* ---------- realtime ---------- */
 function onWsMessage(msg) {
   const { topic, data } = msg;
@@ -121,6 +177,7 @@ function onWsMessage(msg) {
     if (data.instId === state.chartInst) pushCandle(data);
   } else if (topic === "balance") {
     state.balance = data; renderAccount();
+    pushPnlPoint(parseFloat(data.eq));
   } else if (topic === "positions") {
     state.positions = data; renderAccount();
   } else if (topic === "alert") {
@@ -148,7 +205,7 @@ async function boot() {
   $("#mode-badge").textContent = s.mode.toUpperCase();
   $("#mode-badge").className = "badge " + (s.mode === "live" ? "live" : "demo");
   renderWatchlist(); renderAccount(); renderAlerts();
-  initChart();
+  initChart(); initPnlChart();
   connectWs();
 }
 
