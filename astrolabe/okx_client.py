@@ -66,14 +66,16 @@ class OkxRestClient:
             headers["x-simulated-trading"] = "1"
         return headers
 
-    async def _request(self, method: str, path: str, params: dict | None = None) -> Any:
+    async def _request(self, method: str, path: str, params: dict | None = None,
+                       json_body: dict | None = None) -> Any:
         request_path = path
-        body = ""
         if params:
             query = "&".join(f"{k}={v}" for k, v in params.items())
             request_path = f"{path}?{query}"
+        body = json.dumps(json_body) if json_body is not None else ""
         resp = await self._client.request(
-            method, request_path, content=body if method == "POST" else None,
+            method, request_path,
+            content=body if json_body is not None else None,
             headers=self._headers(method, request_path, body),
         )
         if resp.status_code == 429:
@@ -109,3 +111,21 @@ class OkxRestClient:
 
     async def positions(self) -> list[dict]:
         return await self._request("GET", "/api/v5/account/positions", {"instType": "SWAP"})
+
+    # ---- trading (guarded by settings.trading_enabled at the API layer) ----
+    async def place_order(self, inst_id: str, side: str, sz: str) -> dict:
+        """Market order. Spot: sz in base currency (e.g. 0.01 BTC).
+        SWAP: sz in contracts (张)."""
+        if inst_id.endswith("-SWAP"):
+            td_mode = "cross"
+        else:
+            td_mode = "cash"
+        body = {"instId": inst_id, "tdMode": td_mode, "side": side,
+                "ordType": "market", "sz": sz}
+        if inst_id.endswith("-SWAP") is False:
+            body["tgtCcy"] = "base_ccy"
+        result = await self._request("POST", "/api/v5/trade/order", json_body=body)
+        entry = result[0] if result else {}
+        if str(entry.get("sCode", "0")) != "0":
+            raise OkxError(f"order rejected: {entry.get('sMsg')}")
+        return entry

@@ -11,7 +11,9 @@ from pathlib import Path
 class Storage:
     def __init__(self, db_path: str) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(db_path)
+        # all writes flow through the event loop's thread; TestClient uses
+        # a worker thread, so relax sqlite's same-thread guard
+        self._db = sqlite3.connect(db_path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
 

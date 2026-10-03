@@ -196,16 +196,90 @@ function connectWs() {
   ws.onmessage = (e) => { try { onWsMessage(JSON.parse(e.data)); } catch { /* ignore */ } };
 }
 
+/* ---------- trade ---------- */
+function setSide(side) {
+  state.tradeSide = side;
+  $("#side-buy").classList.toggle("active", side === "buy");
+  $("#side-sell").classList.toggle("active", side === "sell");
+}
+
+function updateSzHint() {
+  const inst = $("#trade-inst").value;
+  $("#sz-hint").textContent = inst.includes("SWAP")
+    ? "合约：张数（1 张 = 合约面值，见 OKX 合约详情）"
+    : "现货：币数量（如 0.001 BTC）";
+}
+
+function syncTradeGuard() {
+  const on = state.trading;
+  const badge = $("#trade-guard");
+  badge.textContent = on ? "TRADING ON" : "TRADING OFF";
+  badge.className = "badge " + (on ? "on" : "off");
+  $("#trade-form").classList.toggle("hidden", !on);
+  $("#trade-disabled").classList.toggle("hidden", on);
+  if (!on) return;
+  $("#trade-mode").textContent = state.mode === "live" ? "实盘 LIVE ⚠️" : "模拟盘 DEMO";
+}
+
+function setTradeStatus(text, cls) {
+  const el = $("#trade-status");
+  el.textContent = text;
+  el.className = cls || "muted";
+}
+
+async function submitOrder() {
+  const inst = $("#trade-inst").value;
+  const sz = $("#trade-sz").value.trim();
+  const side = state.tradeSide || "buy";
+  if (!sz || isNaN(sz) || Number(sz) <= 0) {
+    setTradeStatus("请输入有效数量", "error");
+    return;
+  }
+  const sideCn = side === "buy" ? "买入" : "卖出";
+  if (!confirm(`⚠️ 确认市价${sideCn}？\n\n品种: ${inst}\n数量: ${sz}\n\n市价单将立即以盘口价格成交。`)) return;
+  setTradeStatus("下单中…");
+  try {
+    const resp = await fetch("/api/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instId: inst, side, sz }),
+    }).then(r => r.json());
+    if (resp.ok) {
+      setTradeStatus(`✅ 下单成功 (ordId=${resp.ordId})`, "success");
+      $("#trade-sz").value = "";
+    } else {
+      setTradeStatus(`❌ ${resp.error}`, "error");
+    }
+  } catch (exc) {
+    setTradeStatus(`❌ 网络错误: ${exc}`, "error");
+  }
+}
+
+function initTradePanel() {
+  const sel = $("#trade-inst");
+  sel.innerHTML = state.watchlist.map(i => `<option>${i}</option>`).join("");
+  sel.value = state.chartInst;
+  state.tradeSide = "buy";
+  sel.addEventListener("change", updateSzHint);
+  $("#side-buy").addEventListener("click", () => setSide("buy"));
+  $("#side-sell").addEventListener("click", () => setSide("sell"));
+  $("#trade-submit").addEventListener("click", submitOrder);
+  $("#trade-sz").addEventListener("keydown", (e) => { if (e.key === "Enter") submitOrder(); });
+  syncTradeGuard();
+  updateSzHint();
+}
+
 /* ---------- boot ---------- */
 async function boot() {
   const s = await fetch("/api/state").then(r => r.json());
   state.tickers = s.tickers; state.funding = s.funding; state.balance = s.balance;
   state.positions = s.positions; state.alerts = s.alerts; state.private = s.private;
+  state.trading = s.trading; state.mode = s.mode;
   state.watchlist = s.watchlist; state.defaultChartInst = s.watchlist[0];
   $("#mode-badge").textContent = s.mode.toUpperCase();
   $("#mode-badge").className = "badge " + (s.mode === "live" ? "live" : "demo");
   renderWatchlist(); renderAccount(); renderAlerts();
-  initChart(); initPnlChart();
+  initChart(); initPnlChart(); initTradePanel();
   connectWs();
 }
 
