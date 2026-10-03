@@ -28,6 +28,18 @@ function renderWatchlist() {
 }
 
 /* ---------- chart ---------- */
+const DAY_BARS = new Set(["1D", "1W", "1M"]);
+
+function axisLabelFormatter(value) {
+  const d = new Date(+value);
+  if (DAY_BARS.has(state.chartBar)) {
+    return state.chartBar === "1M"
+      ? d.toLocaleDateString("zh-CN", { year: "numeric", month: "short" })
+      : d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  }
+  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
 function initChart() {
   state.chart = echarts.init($("#chart"), "dark");
   window.addEventListener("resize", () => state.chart.resize());
@@ -35,12 +47,19 @@ function initChart() {
   select.innerHTML = state.watchlist.map(i => `<option>${i}</option>`).join("");
   select.value = state.chartInst = state.defaultChartInst || state.watchlist[0];
   select.addEventListener("change", () => { state.chartInst = select.value; loadCandles(); });
+
+  const barSelect = $("#bar-select");
+  const bars = state.timeframes || ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "1M"];
+  barSelect.innerHTML = bars.map(b => `<option value="${b}">${b}</option>`).join("");
+  barSelect.value = state.chartBar = "1m";
+  barSelect.addEventListener("change", () => { state.chartBar = barSelect.value; loadCandles(); });
+
   loadCandles();
 }
 
 async function loadCandles() {
-  const inst = state.chartInst;
-  const candles = await fetch(`/api/candles?instId=${inst}&bar=1m`).then(r => r.json());
+  const inst = state.chartInst, bar = state.chartBar || "1m";
+  const candles = await fetch(`/api/candles?instId=${inst}&bar=${bar}`).then(r => r.json());
   if (!Array.isArray(candles)) return;
   // OKX returns newest-first: [ts, o, h, l, c, ...]
   const rows = candles.map(c => [c[0], c[1], c[2], c[3], c[4]]).reverse();
@@ -56,7 +75,7 @@ function drawChart() {
   state.chart.setOption({
     backgroundColor: "transparent",
     grid: { left: 60, right: 20, top: 20, bottom: 60 },
-    xAxis: { type: "category", data: ts, axisLabel: { color: "#6b7694", formatter: v => new Date(+v).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) } },
+    xAxis: { type: "category", data: ts, axisLabel: { color: "#6b7694", formatter: axisLabelFormatter } },
     yAxis: { scale: true, axisLabel: { color: "#6b7694" }, splitLine: { lineStyle: { color: "#1c2540" } } },
     tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
     series: [{
@@ -174,7 +193,7 @@ function onWsMessage(msg) {
   } else if (topic === "funding") {
     state.funding[data.instId] = parseFloat(data.fundingRate) * 100; renderWatchlist();
   } else if (topic === "candle") {
-    if (data.instId === state.chartInst) pushCandle(data);
+    if (msg.bar === state.chartBar && data.instId === state.chartInst) pushCandle(data);
   } else if (topic === "balance") {
     state.balance = data; renderAccount();
     pushPnlPoint(parseFloat(data.eq));
@@ -276,6 +295,7 @@ async function boot() {
   state.positions = s.positions; state.alerts = s.alerts; state.private = s.private;
   state.trading = s.trading; state.mode = s.mode;
   state.watchlist = s.watchlist; state.defaultChartInst = s.watchlist[0];
+  state.timeframes = s.timeframes;
   $("#mode-badge").textContent = s.mode.toUpperCase();
   $("#mode-badge").className = "badge " + (s.mode === "live" ? "live" : "demo");
   renderWatchlist(); renderAccount(); renderAlerts();

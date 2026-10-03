@@ -82,8 +82,10 @@ async def handle_event(channel: str, item: dict) -> None:
             await _push_alert(alert)
         await broadcaster.broadcast({"topic": "funding", "data": item})
 
-    elif channel == "candle1m":
-        await broadcaster.broadcast({"topic": "candle", "data": item})
+    elif channel.startswith("candle"):
+        await broadcaster.broadcast(
+            {"topic": "candle", "bar": channel[len("candle"):], "data": item}
+        )
 
     elif channel == "account":
         try:
@@ -170,6 +172,7 @@ async def api_state() -> JSONResponse:
         "private": state["private"],
         "trading": state["trading"],
         "watchlist": settings.watchlist,
+        "timeframes": settings.chart_timeframes,
         "tickers": state["tickers"],
         "funding": state["funding"],
         "balance": state["balance"],
@@ -225,7 +228,7 @@ async def api_order(req: OrderRequest) -> JSONResponse:
         result = await rest.place_order(req.instId, req.side, req.sz)
     except Exception as exc:
         log.warning("order rejected: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        return JSONResponse({"error": "order rejected"}, status_code=502)
 
     alert = Alert(
         type="trade", inst_id=req.instId,
