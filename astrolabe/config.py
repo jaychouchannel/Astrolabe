@@ -36,10 +36,16 @@ class Settings:
 
     # instruments: spot + USDT-margined perpetuals
     spot_instruments: list[str] = field(
-        default_factory=lambda: ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+        default_factory=lambda: [
+            "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT",
+            "XRP-USDT", "DOGE-USDT", "ADA-USDT", "AVAX-USDT",
+        ]
     )
     swap_instruments: list[str] = field(
-        default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
+        default_factory=lambda: [
+            "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "BNB-USDT-SWAP",
+            "XRP-USDT-SWAP", "DOGE-USDT-SWAP", "ADA-USDT-SWAP", "AVAX-USDT-SWAP",
+        ]
     )
     default_chart_inst: str = "BTC-USDT"
     chart_timeframes: list[str] = field(
@@ -51,6 +57,9 @@ class Settings:
     price_change_window_s: int = 300   # 5 minutes
     funding_rate_pct: float = 0.1      # abs funding rate threshold, %
     alert_cooldown_s: int = 600        # per (rule, instrument) cooldown
+
+    # trading (disabled by default; requires OKX_TRADING_ENABLED=1)
+    trading_enabled: bool = False
 
     # telegram
     tg_bot_token: str = ""
@@ -84,6 +93,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         secret_key=os.environ.get("OKX_SECRET_KEY", ""),
         passphrase=os.environ.get("OKX_PASSPHRASE", ""),
         simulated=os.environ.get("OKX_SIMULATED", "1") not in ("0", "false", "False"),
+        trading_enabled=os.environ.get("OKX_TRADING_ENABLED", "0") in ("1", "true", "True"),
         spot_instruments=_env_list("SPOT_INSTRUMENTS", ["BTC-USDT", "ETH-USDT", "SOL-USDT"]),
         swap_instruments=_env_list(
             "SWAP_INSTRUMENTS",

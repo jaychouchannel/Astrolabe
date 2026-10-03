@@ -103,6 +103,7 @@ function renderAccount() {
   const hasPrivate = state.private;
   $("#account-guide").classList.toggle("hidden", hasPrivate);
   $("#account-data").classList.toggle("hidden", !hasPrivate);
+  if (hasPrivate && state.pnlChart) state.pnlChart.resize();
   if (!hasPrivate) return;
   const eq = state.balance ? parseFloat(state.balance.eq) : null;
   $("#equity").textContent = eq != null ? fmt(eq) + " USDT" : "—";
@@ -129,6 +130,61 @@ function renderAlerts() {
   ).join("") || `<li class="muted">尚无异动</li>`;
 }
 
+/* ---------- pnl curve ---------- */
+function initPnlChart() {
+  const el = $("#pnl-chart");
+  state.pnlChart = echarts.init(el, "dark");
+  window.addEventListener("resize", () => state.pnlChart.resize());
+  fetch("/api/pnl").then(r => r.json()).then(points => {
+    state.pnlData = (points || []).map(p => [p[0] * 1000, p[1]]);
+    drawPnlChart();
+  });
+}
+
+function drawPnlChart() {
+  const data = state.pnlData || [];
+  if (!data.length) return;
+  const values = data.map(p => p[1]);
+  state.pnlChart.setOption({
+    backgroundColor: "transparent",
+    grid: { left: 55, right: 12, top: 12, bottom: 22 },
+    xAxis: {
+      type: "time",
+      axisLabel: { color: "#6b7694", fontSize: 10, formatter: v => new Date(v).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value", scale: true,
+      axisLabel: { color: "#6b7694", fontSize: 10 },
+      splitLine: { lineStyle: { color: "#1c2540" } },
+    },
+    tooltip: {
+      trigger: "axis",
+      formatter: ps => `${new Date(ps[0].value[0]).toLocaleString("zh-CN")}<br/>权益: ${fmt(ps[0].value[1])} USDT`,
+    },
+    series: [{
+      type: "line", data, showSymbol: false, smooth: true,
+      lineStyle: { color: "#7aa2f7", width: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: "#7aa2f744" }, { offset: 1, color: "#7aa2f700" },
+        ]),
+      },
+    }],
+  }, { notMerge: true });
+}
+
+function pushPnlPoint(equity) {
+  if (!equity || equity <= 0) return;
+  if (!state.pnlData) state.pnlData = [];
+  const now = Date.now();
+  const last = state.pnlData.at(-1);
+  if (last && now - last[0] < 5000) state.pnlData.pop(); // throttle to 1 point / 5s
+  state.pnlData.push([now, equity]);
+  if (state.pnlData.length > 500) state.pnlData.shift();
+  drawPnlChart();
+}
+
 /* ---------- realtime ---------- */
 function onWsMessage(msg) {
   const { topic, data } = msg;
@@ -140,6 +196,7 @@ function onWsMessage(msg) {
     if (msg.bar === state.chartBar && data.instId === state.chartInst) pushCandle(data);
   } else if (topic === "balance") {
     state.balance = data; renderAccount();
+    pushPnlPoint(parseFloat(data.eq));
   } else if (topic === "positions") {
     state.positions = data; renderAccount();
   } else if (topic === "alert") {
@@ -158,17 +215,91 @@ function connectWs() {
   ws.onmessage = (e) => { try { onWsMessage(JSON.parse(e.data)); } catch { /* ignore */ } };
 }
 
+/* ---------- trade ---------- */
+function setSide(side) {
+  state.tradeSide = side;
+  $("#side-buy").classList.toggle("active", side === "buy");
+  $("#side-sell").classList.toggle("active", side === "sell");
+}
+
+function updateSzHint() {
+  const inst = $("#trade-inst").value;
+  $("#sz-hint").textContent = inst.includes("SWAP")
+    ? "合约：张数（1 张 = 合约面值，见 OKX 合约详情）"
+    : "现货：币数量（如 0.001 BTC）";
+}
+
+function syncTradeGuard() {
+  const on = state.trading;
+  const badge = $("#trade-guard");
+  badge.textContent = on ? "TRADING ON" : "TRADING OFF";
+  badge.className = "badge " + (on ? "on" : "off");
+  $("#trade-form").classList.toggle("hidden", !on);
+  $("#trade-disabled").classList.toggle("hidden", on);
+  if (!on) return;
+  $("#trade-mode").textContent = state.mode === "live" ? "实盘 LIVE ⚠️" : "模拟盘 DEMO";
+}
+
+function setTradeStatus(text, cls) {
+  const el = $("#trade-status");
+  el.textContent = text;
+  el.className = cls || "muted";
+}
+
+async function submitOrder() {
+  const inst = $("#trade-inst").value;
+  const sz = $("#trade-sz").value.trim();
+  const side = state.tradeSide || "buy";
+  if (!sz || isNaN(sz) || Number(sz) <= 0) {
+    setTradeStatus("请输入有效数量", "error");
+    return;
+  }
+  const sideCn = side === "buy" ? "买入" : "卖出";
+  if (!confirm(`⚠️ 确认市价${sideCn}？\n\n品种: ${inst}\n数量: ${sz}\n\n市价单将立即以盘口价格成交。`)) return;
+  setTradeStatus("下单中…");
+  try {
+    const resp = await fetch("/api/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instId: inst, side, sz }),
+    }).then(r => r.json());
+    if (resp.ok) {
+      setTradeStatus(`✅ 下单成功 (ordId=${resp.ordId})`, "success");
+      $("#trade-sz").value = "";
+    } else {
+      setTradeStatus(`❌ ${resp.error}`, "error");
+    }
+  } catch (exc) {
+    setTradeStatus(`❌ 网络错误: ${exc}`, "error");
+  }
+}
+
+function initTradePanel() {
+  const sel = $("#trade-inst");
+  sel.innerHTML = state.watchlist.map(i => `<option>${i}</option>`).join("");
+  sel.value = state.chartInst;
+  state.tradeSide = "buy";
+  sel.addEventListener("change", updateSzHint);
+  $("#side-buy").addEventListener("click", () => setSide("buy"));
+  $("#side-sell").addEventListener("click", () => setSide("sell"));
+  $("#trade-submit").addEventListener("click", submitOrder);
+  $("#trade-sz").addEventListener("keydown", (e) => { if (e.key === "Enter") submitOrder(); });
+  syncTradeGuard();
+  updateSzHint();
+}
+
 /* ---------- boot ---------- */
 async function boot() {
   const s = await fetch("/api/state").then(r => r.json());
   state.tickers = s.tickers; state.funding = s.funding; state.balance = s.balance;
   state.positions = s.positions; state.alerts = s.alerts; state.private = s.private;
+  state.trading = s.trading; state.mode = s.mode;
   state.watchlist = s.watchlist; state.defaultChartInst = s.watchlist[0];
   state.timeframes = s.timeframes;
   $("#mode-badge").textContent = s.mode.toUpperCase();
   $("#mode-badge").className = "badge " + (s.mode === "live" ? "live" : "demo");
   renderWatchlist(); renderAccount(); renderAlerts();
-  initChart();
+  initChart(); initPnlChart(); initTradePanel();
   connectWs();
 }
 
