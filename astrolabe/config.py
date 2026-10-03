@@ -16,8 +16,8 @@ def _load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+        value = value.split(" #")[0].strip().strip('"').strip("'")
+        os.environ.setdefault(key.strip(), value)
 
 
 def _env_list(name: str, default: list[str]) -> list[str]:

@@ -40,7 +40,16 @@ cp .env.example .env    # 按需填写 API Key / Telegram 配置
 
 - 在 OKX「API 管理」创建 Key 时**只勾选【读取】**，绝不勾选交易/提币。
 - 建议先使用**模拟盘 Key**（`OKX_SIMULATED=1`）。
-- `.env` 已在 `.gitignore` 中，**不要**提交到仓库。
+- `.env` 已在 `.gitignore` 中，**不会**被提交到仓库 —— Key 只存在你本地。
+
+## ⭐ 开机自启（Windows）
+
+```bat
+copy scripts\start_astrolabe.vbs "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\"
+```
+
+登录 Windows 后自动后台启动星盘并打开看板；已在运行则只打开页面。
+停止服务：运行 `scripts\stop_astrolabe.bat`。
 
 ## 🧪 Tests
 
