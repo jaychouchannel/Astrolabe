@@ -228,7 +228,7 @@ async def api_order(req: OrderRequest) -> JSONResponse:
         result = await rest.place_order(req.instId, req.side, req.sz)
     except Exception as exc:
         log.warning("order rejected: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        return JSONResponse({"error": "order rejected"}, status_code=502)
 
     alert = Alert(
         type="trade", inst_id=req.instId,
