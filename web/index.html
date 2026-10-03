@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜观天象 · Astrolabe</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">🔭</span>
+    <div>
+      <h1>夜观天象 <span class="en">Astrolabe</span></h1>
+      <p class="subtitle">OKX 行情监控 · 交易看板</p>
+    </div>
+  </div>
+  <div class="status">
+    <span id="mode-badge" class="badge">DEMO</span>
+    <span id="ws-status" class="badge ok">● LIVE</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="watchlist-panel">
+    <h2>星象簿 · Watchlist</h2>
+    <table id="watchlist">
+      <thead><tr><th>品种</th><th>最新价</th><th>24h涨跌</th><th>24h高/低</th><th>资金费率</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="panel" id="chart-panel">
+    <h2>观星图 · K线
+      <select id="inst-select"></select>
+    </h2>
+    <div id="chart"></div>
+  </section>
+
+  <div class="column">
+    <section class="panel" id="account-panel">
+      <h2>司天监 · Account</h2>
+      <div id="account-guide" class="guide hidden">
+        <p>未配置 OKX API Key —— 当前为纯公开行情模式。</p>
+        <p>复制 <code>.env.example</code> 为 <code>.env</code>，填入只读 API Key（建议先用模拟盘）即可点亮此面板。</p>
+      </div>
+      <div id="account-data">
+        <div class="equity-row">
+          <span>USDT 权益</span><strong id="equity">—</strong>
+        </div>
+        <table id="positions">
+          <thead><tr><th>合约</th><th>方向</th><th>数量</th><th>开仓价</th><th>未实现盈亏</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="no-positions" class="muted">当前无持仓</p>
+      </div>
+    </section>
+
+    <section class="panel" id="alerts-panel">
+      <h2>天象异动 · Alerts</h2>
+      <ul id="alerts"><li class="muted">尚无异动</li></ul>
+    </section>
+  </div>
+</main>
+
+<footer>夜观天象，不改天命 · observe, don't predict · <a href="https://www.okx.com" target="_blank" rel="noopener">data: OKX v5</a></footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
