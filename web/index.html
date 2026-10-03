@@ -39,6 +39,28 @@
   </section>
 
   <div class="column">
+    <section class="panel" id="trade-panel">
+      <h2>司南 · Trade <span id="trade-guard" class="badge off">TRADING OFF</span></h2>
+      <div id="trade-form">
+        <div class="trade-row">
+          <select id="trade-inst"></select>
+          <div class="side-toggle">
+            <button id="side-buy" class="active">买入</button><button id="side-sell">卖出</button>
+          </div>
+        </div>
+        <div class="trade-row">
+          <input id="trade-sz" type="text" placeholder="数量" autocomplete="off">
+          <button id="trade-submit">市价下单</button>
+        </div>
+        <p id="sz-hint" class="muted">现货：币数量（如 0.01）；合约：张数</p>
+        <p id="trade-status" class="muted"></p>
+      </div>
+      <div id="trade-disabled" class="guide hidden">
+        <p>交易功能未开启。确认风险后，在 <code>.env</code> 中设置 <code>OKX_TRADING_ENABLED=1</code> 并重启服务。</p>
+        <p>⚠️ 下单将直接发送到 OKX（当前模式：<span id="trade-mode">DEMO</span>）。请先用小数量在模拟盘验证。</p>
+      </div>
+    </section>
+
     <section class="panel" id="account-panel">
       <h2>司天监 · Account</h2>
       <div id="account-guide" class="guide hidden">

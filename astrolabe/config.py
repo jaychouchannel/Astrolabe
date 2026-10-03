@@ -49,6 +49,9 @@ class Settings:
     funding_rate_pct: float = 0.1      # abs funding rate threshold, %
     alert_cooldown_s: int = 600        # per (rule, instrument) cooldown
 
+    # trading (disabled by default; requires OKX_TRADING_ENABLED=1)
+    trading_enabled: bool = False
+
     # telegram
     tg_bot_token: str = ""
     tg_chat_id: str = ""
@@ -81,6 +84,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         secret_key=os.environ.get("OKX_SECRET_KEY", ""),
         passphrase=os.environ.get("OKX_PASSPHRASE", ""),
         simulated=os.environ.get("OKX_SIMULATED", "1") not in ("0", "false", "False"),
+        trading_enabled=os.environ.get("OKX_TRADING_ENABLED", "0") in ("1", "true", "True"),
         spot_instruments=_env_list("SPOT_INSTRUMENTS", ["BTC-USDT", "ETH-USDT", "SOL-USDT"]),
         swap_instruments=_env_list(
             "SWAP_INSTRUMENTS",
