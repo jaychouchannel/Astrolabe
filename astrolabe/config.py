@@ -42,6 +42,9 @@ class Settings:
         default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
     )
     default_chart_inst: str = "BTC-USDT"
+    chart_timeframes: list[str] = field(
+        default_factory=lambda: ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "1M"]
+    )
 
     # alert thresholds
     price_change_pct: float = 2.0      # % move within window triggers alert
@@ -87,6 +90,10 @@ def load_settings(env_file: Path | None = None) -> Settings:
             ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"],
         ),
         default_chart_inst=os.environ.get("DEFAULT_CHART_INST", "BTC-USDT"),
+        chart_timeframes=_env_list(
+            "CHART_TIMEFRAMES",
+            ["1m", "5m", "15m", "1H", "4H", "1D", "1W", "1M"],
+        ),
         price_change_pct=float(os.environ.get("ALERT_PRICE_CHANGE_PCT", "2.0")),
         price_change_window_s=int(os.environ.get("ALERT_PRICE_WINDOW_S", "300")),
         funding_rate_pct=float(os.environ.get("ALERT_FUNDING_PCT", "0.1")),

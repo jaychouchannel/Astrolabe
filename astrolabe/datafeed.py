@@ -92,7 +92,8 @@ class Datafeed:
         args: list[dict] = []
         for inst in self.s.watchlist:
             args.append({"channel": "tickers", "instId": inst})
-            args.append({"channel": "candle1m", "instId": inst})
+            for bar in self.s.chart_timeframes:
+                args.append({"channel": f"candle{bar}", "instId": inst})
         for inst in self.s.swap_instruments:
             args.append({"channel": "funding-rate", "instId": inst})
         return args

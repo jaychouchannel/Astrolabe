@@ -80,8 +80,10 @@ async def handle_event(channel: str, item: dict) -> None:
             await _push_alert(alert)
         await broadcaster.broadcast({"topic": "funding", "data": item})
 
-    elif channel == "candle1m":
-        await broadcaster.broadcast({"topic": "candle", "data": item})
+    elif channel.startswith("candle"):
+        await broadcaster.broadcast(
+            {"topic": "candle", "bar": channel[len("candle"):], "data": item}
+        )
 
     elif channel == "account":
         try:
@@ -167,6 +169,7 @@ async def api_state() -> JSONResponse:
         "mode": state["mode"],
         "private": state["private"],
         "watchlist": settings.watchlist,
+        "timeframes": settings.chart_timeframes,
         "tickers": state["tickers"],
         "funding": state["funding"],
         "balance": state["balance"],
