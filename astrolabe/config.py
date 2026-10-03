@@ -36,10 +36,16 @@ class Settings:
 
     # instruments: spot + USDT-margined perpetuals
     spot_instruments: list[str] = field(
-        default_factory=lambda: ["BTC-USDT", "ETH-USDT", "SOL-USDT"]
+        default_factory=lambda: [
+            "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT",
+            "XRP-USDT", "DOGE-USDT", "ADA-USDT", "AVAX-USDT",
+        ]
     )
     swap_instruments: list[str] = field(
-        default_factory=lambda: ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
+        default_factory=lambda: [
+            "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "BNB-USDT-SWAP",
+            "XRP-USDT-SWAP", "DOGE-USDT-SWAP", "ADA-USDT-SWAP", "AVAX-USDT-SWAP",
+        ]
     )
     default_chart_inst: str = "BTC-USDT"
 
