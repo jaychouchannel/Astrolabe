@@ -20,6 +20,7 @@ from .broadcaster import Broadcaster
 from .config import load_settings
 from .datafeed import Datafeed
 from .okx_client import OkxRestClient
+from .signals import compute_signals
 from .storage import Storage
 from .telegram_notifier import TelegramNotifier
 
@@ -184,6 +185,27 @@ async def api_candles(instId: str, bar: str = "1m") -> JSONResponse:
         return JSONResponse(await rest.candles(instId, bar))
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+SIGNALS_CACHE_TTL_S = 30
+_signals_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+@app.get("/api/signals")
+async def api_signals(instId: str, bar: str = "1m") -> JSONResponse:
+    """做T参考信号 (MA cross + RSI + Bollinger) — 仅观察参考，非投资建议。"""
+    key = (instId, bar)
+    now = time.time()
+    cached = _signals_cache.get(key)
+    if cached and now - cached[0] < SIGNALS_CACHE_TTL_S:
+        return JSONResponse(cached[1])
+    try:
+        candles = await rest.candles(instId, bar, limit=100)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    result = compute_signals(candles)
+    _signals_cache[key] = (now, result)
+    return JSONResponse(result)
 
 
 @app.get("/api/alerts")
