@@ -14,13 +14,13 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
-from .alert_engine import Alert, AlertEngine
+from .alert_engine import AlertEngine
 from .broadcaster import Broadcaster
 from .config import load_settings
 from .datafeed import Datafeed
 from .okx_client import OkxRestClient
+from .signals import compute_signals
 from .storage import Storage
 from .telegram_notifier import TelegramNotifier
 
@@ -44,7 +44,6 @@ state: dict = {
     "alerts": [],       # latest alerts (also persisted)
     "mode": "demo" if settings.simulated else "live",
     "private": settings.has_private_access,
-    "trading": settings.trading_enabled,
 }
 
 
@@ -170,7 +169,6 @@ async def api_state() -> JSONResponse:
     return JSONResponse({
         "mode": state["mode"],
         "private": state["private"],
-        "trading": state["trading"],
         "watchlist": settings.watchlist,
         "timeframes": settings.chart_timeframes,
         "tickers": state["tickers"],
@@ -189,6 +187,27 @@ async def api_candles(instId: str, bar: str = "1m") -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=502)
 
 
+SIGNALS_CACHE_TTL_S = 30
+_signals_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+@app.get("/api/signals")
+async def api_signals(instId: str, bar: str = "1m") -> JSONResponse:
+    """做T参考信号 (MA cross + RSI + Bollinger) — 仅观察参考，非投资建议。"""
+    key = (instId, bar)
+    now = time.time()
+    cached = _signals_cache.get(key)
+    if cached and now - cached[0] < SIGNALS_CACHE_TTL_S:
+        return JSONResponse(cached[1])
+    try:
+        candles = await rest.candles(instId, bar, limit=100)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    result = compute_signals(candles)
+    _signals_cache[key] = (now, result)
+    return JSONResponse(result)
+
+
 @app.get("/api/alerts")
 async def api_alerts() -> JSONResponse:
     return JSONResponse(storage.recent_alerts())
@@ -197,53 +216,6 @@ async def api_alerts() -> JSONResponse:
 @app.get("/api/pnl")
 async def api_pnl() -> JSONResponse:
     return JSONResponse(storage.pnl_history())
-
-
-class OrderRequest(BaseModel):
-    instId: str
-    side: str          # buy | sell
-    sz: str            # spot: base-currency amount (e.g. "0.01"); swap: contracts
-
-
-@app.post("/api/order")
-async def api_order(req: OrderRequest) -> JSONResponse:
-    """Market order. Hard-gated: disabled unless OKX_TRADING_ENABLED=1 in .env."""
-    if not settings.trading_enabled:
-        return JSONResponse(
-            {"error": "trading is disabled — set OKX_TRADING_ENABLED=1 in .env and restart"},
-            status_code=403,
-        )
-    if not settings.has_private_access:
-        return JSONResponse({"error": "no OKX API key configured"}, status_code=403)
-    if req.side not in ("buy", "sell"):
-        return JSONResponse({"error": "side must be buy or sell"}, status_code=400)
-    try:
-        float(req.sz)
-        if float(req.sz) <= 0:
-            raise ValueError
-    except ValueError:
-        return JSONResponse({"error": "invalid size"}, status_code=400)
-
-    try:
-        result = await rest.place_order(req.instId, req.side, req.sz)
-    except Exception as exc:
-        log.warning("order rejected: %s", exc)
-        return JSONResponse({"error": "order rejected"}, status_code=502)
-
-    alert = Alert(
-        type="trade", inst_id=req.instId,
-        message=(f"🧭 市价{'买入' if req.side == 'buy' else '卖出'}下单成功: "
-                 f"{req.instId} {req.sz} (ordId={result.get('ordId')})"),
-        severity="warn",
-    )
-    await _push_alert(alert)
-    # refresh positions so the account panel reflects the fill ASAP
-    try:
-        state["positions"] = await rest.positions()
-        await broadcaster.broadcast({"topic": "positions", "data": state["positions"]})
-    except Exception:
-        pass
-    return JSONResponse({"ok": True, "ordId": result.get("ordId")})
 
 
 @app.websocket("/ws")
