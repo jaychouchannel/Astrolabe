@@ -3,7 +3,7 @@
 
 const state = {
   tickers: {}, funding: {}, balance: null, positions: [], alerts: [],
-  chartInst: null, chart: null,
+  chartInst: null, chart: null, signals: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -59,36 +59,85 @@ function initChart() {
 
 async function loadCandles() {
   const inst = state.chartInst, bar = state.chartBar || "1m";
-  const candles = await fetch(`/api/candles?instId=${inst}&bar=${bar}`).then(r => r.json());
-  if (!Array.isArray(candles)) return;
-  // OKX returns newest-first: [ts, o, h, l, c, ...]
-  const rows = candles.map(c => [c[0], c[1], c[2], c[3], c[4]]).reverse();
-  const ts = rows.map(r => parseInt(r[0]));
-  const kdata = rows.map(r => [+r[1], +r[2], +r[3], +r[4]]);
-  state.chartData = { ts, kdata };
+  const [candles, signals] = await Promise.all([
+    fetch(`/api/candles?instId=${inst}&bar=${bar}`).then(r => r.json()).catch(() => null),
+    fetch(`/api/signals?instId=${inst}&bar=${bar}`).then(r => r.json()).catch(() => null),
+  ]);
+  if (Array.isArray(candles)) {
+    // OKX returns newest-first: [ts, o, h, l, c, ...]
+    const rows = candles.map(c => [c[0], c[1], c[2], c[3], c[4]]).reverse();
+    const ts = rows.map(r => parseInt(r[0]));
+    // ECharts candlestick expects [open, close, lowest, highest]
+    const kdata = rows.map(r => [+r[1], +r[4], +r[3], +r[2]]);
+    state.chartData = { ts, kdata };
+  }
+  state.signals = signals && !signals.error ? signals : null;
+  renderSignalBar();
   drawChart();
+}
+
+const ACTION_META = {
+  buy_in: { text: "接回", color: "#4fd6a0" },
+  sell_out: { text: "T出", color: "#f7768e" },
+  hold: { text: "观望", color: "#6b7694" },
+};
+
+function buildSignalMarkPoints() {
+  const sig = state.signals;
+  if (!sig || !state.chartData) return [];
+  const { ts, kdata } = state.chartData;
+  const data = [];
+  const cross = sig.last_cross;
+  if (cross && kdata[ts.indexOf(cross.ts)]) {
+    const i = ts.indexOf(cross.ts);
+    if (cross.type === "golden") {
+      data.push({ coord: [i, kdata[i][2]], symbol: "triangle", symbolSize: 9,
+        symbolOffset: [0, 14], itemStyle: { color: "#4fd6a0" },
+        label: { show: true, formatter: "金叉", position: "bottom", fontSize: 10, color: "#4fd6a0" } });
+    } else {
+      data.push({ coord: [i, kdata[i][3]], symbol: "triangle", symbolRotate: 180, symbolSize: 9,
+        symbolOffset: [0, -14], itemStyle: { color: "#f7768e" },
+        label: { show: true, formatter: "死叉", position: "top", fontSize: 10, color: "#f7768e" } });
+    }
+  }
+  const meta = ACTION_META[sig.action] || ACTION_META.hold;
+  const lastIdx = kdata.length - 1;
+  data.push({ coord: [lastIdx, kdata[lastIdx][1]], symbol: "pin", symbolSize: 34,
+    symbolOffset: [0, "-160%"], itemStyle: { color: meta.color },
+    label: { show: true, formatter: meta.text, color: "#0a0e1a", fontSize: 10, fontWeight: "bold" } });
+  return data;
 }
 
 function drawChart() {
   const { ts, kdata } = state.chartData || {};
   if (!ts) return;
+  const series = [{
+    type: "candlestick", data: kdata,
+    itemStyle: { color: "#4fd6a0", color0: "#f7768e", borderColor: "#4fd6a0", borderColor0: "#f7768e" },
+    markPoint: { data: buildSignalMarkPoints(), animation: false },
+  }];
+  if (state.signals) {
+    for (const [key, color] of [["boll_upper", "#f7768e88"], ["boll_mid", "#7aa2f788"], ["boll_lower", "#4fd6a088"]]) {
+      series.push({
+        type: "line", data: state.signals.series[key], showSymbol: false, connectNulls: true,
+        silent: true, lineStyle: { type: "dashed", width: 1, color },
+      });
+    }
+  }
   state.chart.setOption({
     backgroundColor: "transparent",
-    grid: { left: 60, right: 20, top: 20, bottom: 60 },
+    grid: { left: 60, right: 20, top: 40, bottom: 60 },
     xAxis: { type: "category", data: ts, axisLabel: { color: "#6b7694", formatter: axisLabelFormatter } },
     yAxis: { scale: true, axisLabel: { color: "#6b7694" }, splitLine: { lineStyle: { color: "#1c2540" } } },
     tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
-    series: [{
-      type: "candlestick", data: kdata,
-      itemStyle: { color: "#4fd6a0", color0: "#f7768e", borderColor: "#4fd6a0", borderColor0: "#f7768e" },
-    }],
+    series,
   }, { notMerge: true });
 }
 
 function pushCandle(c) {
   if (!state.chartData) return;
-  const i = state.chartData.ts.indexOf(c[0]);
-  const bar = [+c[1], +c[2], +c[3], +c[4]];
+  const i = state.chartData.ts.indexOf(parseInt(c[0]));
+  const bar = [+c[1], +c[4], +c[3], +c[2]]; // [open, close, low, high]
   if (i === -1) {
     state.chartData.ts.push(c[0]); state.chartData.kdata.push(bar);
     if (state.chartData.ts.length > 300) { state.chartData.ts.shift(); state.chartData.kdata.shift(); }
@@ -96,6 +145,23 @@ function pushCandle(c) {
     state.chartData.kdata[i] = bar;
   }
   drawChart();
+}
+
+/* ---------- signal bar (做T参考) ---------- */
+function renderSignalBar() {
+  const s = state.signals;
+  $("#signal-bar").classList.toggle("hidden", !s);
+  if (!s) return;
+  const dec = (v) => (v != null && v >= 1000) ? 0 : 2;
+  $("#sig-ma5").textContent = `MA5 ${fmt(s.ma5, dec(s.ma5))}`;
+  $("#sig-ma20").textContent = `MA20 ${fmt(s.ma20, dec(s.ma20))}`;
+  $("#sig-rsi").textContent = `RSI ${s.rsi == null ? "—" : s.rsi.toFixed(0)}`;
+  $("#sig-boll").textContent = `%B ${s.boll ? Math.round(s.boll.pctb * 100) + "%" : "—"}`;
+  const meta = ACTION_META[s.action] || ACTION_META.hold;
+  const actionEl = $("#sig-action");
+  actionEl.textContent = meta.text;
+  actionEl.className = "signal-badge action " + s.action;
+  actionEl.title = s.reason || "";
 }
 
 /* ---------- account ---------- */

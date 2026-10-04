@@ -14,6 +14,7 @@ your positions & equity, plus Telegram alerts on market anomalies. **Observe, do
 
 - 📈 **Watchlist 星象簿** — 主流币现货 + USDT 永续实时行情、24h 涨跌、资金费率
 - 🕯️ **K 线观星图** — 1m K 线实时刷新（ECharts 蜡烛图）
+- 🎯 **做T参考信号** — MA 金叉死叉 + RSI + 布林带合成「接回 / T出 / 观望」参考，直接标注在 K 线图上（仅观察参考，非投资建议）
 - 💰 **司天监账户面板** — USDT 权益、持仓方向/数量/未实现盈亏（需只读 API Key）
 - 🚨 **天象异动告警** — 价格短时剧烈波动 / 资金费率越阈 / 开平仓 / 权益变动，阈值可配置
 - 📨 **Telegram 推送** — 告警实时送达手机
