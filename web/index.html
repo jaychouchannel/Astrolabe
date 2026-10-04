@@ -31,15 +31,6 @@
     </table>
   </section>
 
-  <section class="panel" id="chart-panel">
-    <h2>观星图 · K线
-      <span class="chart-controls">
-        <select id="bar-select"></select>
-        <select id="inst-select"></select>
-      </span>
-    </h2>
-    <div id="chart"></div>
-  </section>
 
   <div class="column">
     <section class="panel" id="trade-panel">
@@ -88,6 +79,23 @@
       <ul id="alerts"><li class="muted">尚无异动</li></ul>
     </section>
   </div>
+  <section class="panel" id="chart-panel">
+    <h2>观星图 · K线
+      <span class="chart-controls">
+        <select id="bar-select"></select>
+        <select id="inst-select"></select>
+      </span>
+    </h2>
+    <div id="signal-bar" class="hidden">
+      <span class="signal-badge" id="sig-ma5">MA5 —</span>
+      <span class="signal-badge" id="sig-ma20">MA20 —</span>
+      <span class="signal-badge" id="sig-rsi">RSI —</span>
+      <span class="signal-badge" id="sig-boll">%B —</span>
+      <span class="signal-badge action hold" id="sig-action">—</span>
+      <span class="disclaimer">信号仅供做 T 参考 · 非投资建议</span>
+    </div>
+    <div id="chart"></div>
+  </section>
 </main>
 
 <footer>夜观天象，不改天命 · observe, don't predict · <a href="https://www.okx.com" target="_blank" rel="noopener">data: OKX v5</a></footer>
