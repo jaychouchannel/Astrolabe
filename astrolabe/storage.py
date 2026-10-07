@@ -29,6 +29,11 @@ class Storage:
                 ts REAL NOT NULL, type TEXT NOT NULL,
                 inst_id TEXT NOT NULL, message TEXT NOT NULL, severity TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS trades (
+                ts REAL NOT NULL, inst_id TEXT NOT NULL, action TEXT NOT NULL,
+                direction TEXT NOT NULL, sz INTEGER NOT NULL, px REAL NOT NULL,
+                usdt_notional REAL NOT NULL, signal TEXT NOT NULL, pnl REAL NOT NULL
+            );
             """
         )
         self._db.commit()
@@ -59,6 +64,16 @@ class Storage:
             )
         self._db.commit()
 
+    def record_trade(self, trade: dict) -> None:
+        self._db.execute(
+            "INSERT INTO trades(ts, inst_id, action, direction, sz, px, "
+            "usdt_notional, signal, pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (trade["ts"], trade["inst_id"], trade["action"], trade["direction"],
+             trade["sz"], trade["px"], trade["usdt_notional"],
+             trade["signal"], trade["pnl"]),
+        )
+        self._db.commit()
+
     # ---- reads ----
     def price_history(self, inst_id: str, limit: int = 500) -> list[tuple[float, float]]:
         rows = self._db.execute(
@@ -75,6 +90,18 @@ class Storage:
         ).fetchall()
         return [
             {"ts": r[0], "type": r[1], "instId": r[2], "message": r[3], "severity": r[4]}
+            for r in rows
+        ]
+
+    def recent_trades(self, limit: int = 50) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT ts, inst_id, action, direction, sz, px, usdt_notional, "
+            "signal, pnl FROM trades ORDER BY ts DESC LIMIT ?", (limit,),
+        ).fetchall()
+        return [
+            {"ts": r[0], "instId": r[1], "action": r[2], "direction": r[3],
+             "sz": r[4], "px": r[5], "usdtNotional": r[6], "signal": r[7],
+             "pnl": r[8]}
             for r in rows
         ]
 
