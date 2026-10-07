@@ -104,6 +104,8 @@ class StrategyRunner:
 
     async def on_signal(self, signal: dict) -> None:
         self.last_signal = signal
+        if signal.get("action", "hold") == "hold":
+            return  # hold = do nothing; only a reversal signal closes the position
         if time.time() - self.last_trade_ts < self.s.strategy_cooldown_s:
             return
         target = TARGET_FROM_ACTION.get(signal.get("action", "hold"))
@@ -140,6 +142,7 @@ class StrategyRunner:
                                      "action": "error", "direction": direction,
                                      "sz": sz, "px": price, "usdtNotional": 0.0,
                                      "signal": signal.get("action", ""), "pnl": 0.0})
+            self.last_trade_ts = time.time()  # back off via cooldown on failure
             return
         px = float(result.get("avgPx") or price)
         notional = px * sz * self.ct_val

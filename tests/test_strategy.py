@@ -116,6 +116,15 @@ def test_hold_keeps_position(tmp_path):
     assert rest.orders == [] and runner.side is None
 
 
+def test_hold_while_holding_keeps_position(tmp_path):
+    runner, rest = make_runner(DOWNTREND, tmp_path)
+    asyncio.run(runner.step())  # open long
+    rest.candles_data = FLAT
+    runner.last_trade_ts = 0.0  # expire cooldown
+    asyncio.run(runner.step())  # hold while holding -> no close
+    assert len(rest.orders) == 1 and runner.side == "long"
+
+
 def test_cooldown_suppresses_retrigger(tmp_path):
     runner, rest = make_runner(DOWNTREND, tmp_path)
     asyncio.run(runner.step())
