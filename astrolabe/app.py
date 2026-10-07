@@ -171,9 +171,12 @@ async def lifespan(app: FastAPI):
     log.info("Astrolabe 夜观天象 started — mode=%s private=%s watchlist=%s",
              state["mode"], state["private"], settings.watchlist)
     yield
-    if runner:
-        await runner.stop()
     await feed.stop()
+    if runner:
+        try:
+            await runner.stop()
+        except Exception:
+            log.exception("strategy runner failed to stop")
     await rest.close()
     await notifier.close()
     storage.close()
