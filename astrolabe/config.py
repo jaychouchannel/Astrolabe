@@ -56,6 +56,17 @@ class Settings:
     tg_bot_token: str = ""
     tg_chat_id: str = ""
 
+    # strategy auto-trading (观星执行) — all gates default OFF
+    trading_enabled: bool = False     # okx_client.place_order 总闸
+    strategy_enabled: bool = False    # 策略后台循环开关
+    allow_live: bool = False          # 实盘许可 (仅 simulated=False 时需要)
+    strategy_inst: str = "BTC-USDT-SWAP"
+    strategy_bar: str = "1m"
+    strategy_size_usdt: float = 100.0  # 每笔保证金预算 (USDT)
+    strategy_lever: int = 3            # 隔离杠杆倍数
+    strategy_poll_s: int = 60
+    strategy_cooldown_s: int = 300
+
     # server
     host: str = "127.0.0.1"
     port: int = 8765
@@ -102,5 +113,14 @@ def load_settings(env_file: Path | None = None) -> Settings:
         tg_chat_id=os.environ.get("TG_CHAT_ID", ""),
         host=os.environ.get("HOST", "127.0.0.1"),
         port=int(os.environ.get("PORT", "8765")),
+        trading_enabled=os.environ.get("OKX_TRADING_ENABLED", "0") in ("1", "true", "True"),
+        strategy_enabled=os.environ.get("STRATEGY_ENABLED", "0") in ("1", "true", "True"),
+        allow_live=os.environ.get("STRATEGY_ALLOW_LIVE", "0") in ("1", "true", "True"),
+        strategy_inst=os.environ.get("STRATEGY_INST", "BTC-USDT-SWAP"),
+        strategy_bar=os.environ.get("STRATEGY_BAR", "1m"),
+        strategy_size_usdt=float(os.environ.get("STRATEGY_SIZE_USDT", "100")),
+        strategy_lever=int(os.environ.get("STRATEGY_LEVER", "3")),
+        strategy_poll_s=int(os.environ.get("STRATEGY_POLL_S", "60")),
+        strategy_cooldown_s=int(os.environ.get("STRATEGY_COOLDOWN_S", "300")),
         db_path=os.environ.get("DB_PATH", "astrolabe.db"),
     )
