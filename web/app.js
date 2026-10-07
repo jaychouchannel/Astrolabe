@@ -3,7 +3,7 @@
 
 const state = {
   tickers: {}, funding: {}, balance: null, positions: [], alerts: [],
-  chartInst: null, chart: null,
+  chartInst: null, chart: null, signals: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -59,36 +59,85 @@ function initChart() {
 
 async function loadCandles() {
   const inst = state.chartInst, bar = state.chartBar || "1m";
-  const candles = await fetch(`/api/candles?instId=${inst}&bar=${bar}`).then(r => r.json());
-  if (!Array.isArray(candles)) return;
-  // OKX returns newest-first: [ts, o, h, l, c, ...]
-  const rows = candles.map(c => [c[0], c[1], c[2], c[3], c[4]]).reverse();
-  const ts = rows.map(r => parseInt(r[0]));
-  const kdata = rows.map(r => [+r[1], +r[2], +r[3], +r[4]]);
-  state.chartData = { ts, kdata };
+  const [candles, signals] = await Promise.all([
+    fetch(`/api/candles?instId=${inst}&bar=${bar}`).then(r => r.json()).catch(() => null),
+    fetch(`/api/signals?instId=${inst}&bar=${bar}`).then(r => r.json()).catch(() => null),
+  ]);
+  if (Array.isArray(candles)) {
+    // OKX returns newest-first: [ts, o, h, l, c, ...]
+    const rows = candles.map(c => [c[0], c[1], c[2], c[3], c[4]]).reverse();
+    const ts = rows.map(r => parseInt(r[0]));
+    // ECharts candlestick expects [open, close, lowest, highest]
+    const kdata = rows.map(r => [+r[1], +r[4], +r[3], +r[2]]);
+    state.chartData = { ts, kdata };
+  }
+  state.signals = signals && !signals.error ? signals : null;
+  renderSignalBar();
   drawChart();
+}
+
+const ACTION_META = {
+  buy_in: { text: "接回", color: "#4fd6a0" },
+  sell_out: { text: "T出", color: "#f7768e" },
+  hold: { text: "观望", color: "#6b7694" },
+};
+
+function buildSignalMarkPoints() {
+  const sig = state.signals;
+  if (!sig || !state.chartData) return [];
+  const { ts, kdata } = state.chartData;
+  const data = [];
+  const cross = sig.last_cross;
+  if (cross && kdata[ts.indexOf(cross.ts)]) {
+    const i = ts.indexOf(cross.ts);
+    if (cross.type === "golden") {
+      data.push({ coord: [i, kdata[i][2]], symbol: "triangle", symbolSize: 9,
+        symbolOffset: [0, 14], itemStyle: { color: "#4fd6a0" },
+        label: { show: true, formatter: "金叉", position: "bottom", fontSize: 10, color: "#4fd6a0" } });
+    } else {
+      data.push({ coord: [i, kdata[i][3]], symbol: "triangle", symbolRotate: 180, symbolSize: 9,
+        symbolOffset: [0, -14], itemStyle: { color: "#f7768e" },
+        label: { show: true, formatter: "死叉", position: "top", fontSize: 10, color: "#f7768e" } });
+    }
+  }
+  const meta = ACTION_META[sig.action] || ACTION_META.hold;
+  const lastIdx = kdata.length - 1;
+  data.push({ coord: [lastIdx, kdata[lastIdx][1]], symbol: "pin", symbolSize: 34,
+    symbolOffset: [0, "-160%"], itemStyle: { color: meta.color },
+    label: { show: true, formatter: meta.text, color: "#0a0e1a", fontSize: 10, fontWeight: "bold" } });
+  return data;
 }
 
 function drawChart() {
   const { ts, kdata } = state.chartData || {};
   if (!ts) return;
+  const series = [{
+    type: "candlestick", data: kdata,
+    itemStyle: { color: "#4fd6a0", color0: "#f7768e", borderColor: "#4fd6a0", borderColor0: "#f7768e" },
+    markPoint: { data: buildSignalMarkPoints(), animation: false },
+  }];
+  if (state.signals) {
+    for (const [key, color] of [["boll_upper", "#f7768e88"], ["boll_mid", "#7aa2f788"], ["boll_lower", "#4fd6a088"]]) {
+      series.push({
+        type: "line", data: state.signals.series[key], showSymbol: false, connectNulls: true,
+        silent: true, lineStyle: { type: "dashed", width: 1, color },
+      });
+    }
+  }
   state.chart.setOption({
     backgroundColor: "transparent",
-    grid: { left: 60, right: 20, top: 20, bottom: 60 },
+    grid: { left: 60, right: 20, top: 40, bottom: 60 },
     xAxis: { type: "category", data: ts, axisLabel: { color: "#6b7694", formatter: axisLabelFormatter } },
     yAxis: { scale: true, axisLabel: { color: "#6b7694" }, splitLine: { lineStyle: { color: "#1c2540" } } },
     tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
-    series: [{
-      type: "candlestick", data: kdata,
-      itemStyle: { color: "#4fd6a0", color0: "#f7768e", borderColor: "#4fd6a0", borderColor0: "#f7768e" },
-    }],
+    series,
   }, { notMerge: true });
 }
 
 function pushCandle(c) {
   if (!state.chartData) return;
-  const i = state.chartData.ts.indexOf(c[0]);
-  const bar = [+c[1], +c[2], +c[3], +c[4]];
+  const i = state.chartData.ts.indexOf(parseInt(c[0]));
+  const bar = [+c[1], +c[4], +c[3], +c[2]]; // [open, close, low, high]
   if (i === -1) {
     state.chartData.ts.push(c[0]); state.chartData.kdata.push(bar);
     if (state.chartData.ts.length > 300) { state.chartData.ts.shift(); state.chartData.kdata.shift(); }
@@ -98,11 +147,29 @@ function pushCandle(c) {
   drawChart();
 }
 
+/* ---------- signal bar (做T参考) ---------- */
+function renderSignalBar() {
+  const s = state.signals;
+  $("#signal-bar").classList.toggle("hidden", !s);
+  if (!s) return;
+  const dec = (v) => (v != null && v >= 1000) ? 0 : 2;
+  $("#sig-ma5").textContent = `MA5 ${fmt(s.ma5, dec(s.ma5))}`;
+  $("#sig-ma20").textContent = `MA20 ${fmt(s.ma20, dec(s.ma20))}`;
+  $("#sig-rsi").textContent = `RSI ${s.rsi == null ? "—" : s.rsi.toFixed(0)}`;
+  $("#sig-boll").textContent = `%B ${s.boll ? Math.round(s.boll.pctb * 100) + "%" : "—"}`;
+  const meta = ACTION_META[s.action] || ACTION_META.hold;
+  const actionEl = $("#sig-action");
+  actionEl.textContent = meta.text;
+  actionEl.className = "signal-badge action " + s.action;
+  actionEl.title = s.reason || "";
+}
+
 /* ---------- account ---------- */
 function renderAccount() {
   const hasPrivate = state.private;
   $("#account-guide").classList.toggle("hidden", hasPrivate);
   $("#account-data").classList.toggle("hidden", !hasPrivate);
+  if (hasPrivate && state.pnlChart) state.pnlChart.resize();
   if (!hasPrivate) return;
   const eq = state.balance ? parseFloat(state.balance.eq) : null;
   $("#equity").textContent = eq != null ? fmt(eq) + " USDT" : "—";
@@ -129,6 +196,61 @@ function renderAlerts() {
   ).join("") || `<li class="muted">尚无异动</li>`;
 }
 
+/* ---------- pnl curve ---------- */
+function initPnlChart() {
+  const el = $("#pnl-chart");
+  state.pnlChart = echarts.init(el, "dark");
+  window.addEventListener("resize", () => state.pnlChart.resize());
+  fetch("/api/pnl").then(r => r.json()).then(points => {
+    state.pnlData = (points || []).map(p => [p[0] * 1000, p[1]]);
+    drawPnlChart();
+  });
+}
+
+function drawPnlChart() {
+  const data = state.pnlData || [];
+  if (!data.length) return;
+  const values = data.map(p => p[1]);
+  state.pnlChart.setOption({
+    backgroundColor: "transparent",
+    grid: { left: 55, right: 12, top: 12, bottom: 22 },
+    xAxis: {
+      type: "time",
+      axisLabel: { color: "#6b7694", fontSize: 10, formatter: v => new Date(v).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) },
+      axisLine: { show: false }, axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value", scale: true,
+      axisLabel: { color: "#6b7694", fontSize: 10 },
+      splitLine: { lineStyle: { color: "#1c2540" } },
+    },
+    tooltip: {
+      trigger: "axis",
+      formatter: ps => `${new Date(ps[0].value[0]).toLocaleString("zh-CN")}<br/>权益: ${fmt(ps[0].value[1])} USDT`,
+    },
+    series: [{
+      type: "line", data, showSymbol: false, smooth: true,
+      lineStyle: { color: "#7aa2f7", width: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: "#7aa2f744" }, { offset: 1, color: "#7aa2f700" },
+        ]),
+      },
+    }],
+  }, { notMerge: true });
+}
+
+function pushPnlPoint(equity) {
+  if (!equity || equity <= 0) return;
+  if (!state.pnlData) state.pnlData = [];
+  const now = Date.now();
+  const last = state.pnlData.at(-1);
+  if (last && now - last[0] < 5000) state.pnlData.pop(); // throttle to 1 point / 5s
+  state.pnlData.push([now, equity]);
+  if (state.pnlData.length > 500) state.pnlData.shift();
+  drawPnlChart();
+}
+
 /* ---------- realtime ---------- */
 function onWsMessage(msg) {
   const { topic, data } = msg;
@@ -140,6 +262,7 @@ function onWsMessage(msg) {
     if (msg.bar === state.chartBar && data.instId === state.chartInst) pushCandle(data);
   } else if (topic === "balance") {
     state.balance = data; renderAccount();
+    pushPnlPoint(parseFloat(data.eq));
   } else if (topic === "positions") {
     state.positions = data; renderAccount();
   } else if (topic === "alert") {
@@ -158,17 +281,91 @@ function connectWs() {
   ws.onmessage = (e) => { try { onWsMessage(JSON.parse(e.data)); } catch { /* ignore */ } };
 }
 
+/* ---------- trade ---------- */
+function setSide(side) {
+  state.tradeSide = side;
+  $("#side-buy").classList.toggle("active", side === "buy");
+  $("#side-sell").classList.toggle("active", side === "sell");
+}
+
+function updateSzHint() {
+  const inst = $("#trade-inst").value;
+  $("#sz-hint").textContent = inst.includes("SWAP")
+    ? "合约：张数（1 张 = 合约面值，见 OKX 合约详情）"
+    : "现货：币数量（如 0.001 BTC）";
+}
+
+function syncTradeGuard() {
+  const on = state.trading;
+  const badge = $("#trade-guard");
+  badge.textContent = on ? "TRADING ON" : "TRADING OFF";
+  badge.className = "badge " + (on ? "on" : "off");
+  $("#trade-form").classList.toggle("hidden", !on);
+  $("#trade-disabled").classList.toggle("hidden", on);
+  if (!on) return;
+  $("#trade-mode").textContent = state.mode === "live" ? "实盘 LIVE ⚠️" : "模拟盘 DEMO";
+}
+
+function setTradeStatus(text, cls) {
+  const el = $("#trade-status");
+  el.textContent = text;
+  el.className = cls || "muted";
+}
+
+async function submitOrder() {
+  const inst = $("#trade-inst").value;
+  const sz = $("#trade-sz").value.trim();
+  const side = state.tradeSide || "buy";
+  if (!sz || isNaN(sz) || Number(sz) <= 0) {
+    setTradeStatus("请输入有效数量", "error");
+    return;
+  }
+  const sideCn = side === "buy" ? "买入" : "卖出";
+  if (!confirm(`⚠️ 确认市价${sideCn}？\n\n品种: ${inst}\n数量: ${sz}\n\n市价单将立即以盘口价格成交。`)) return;
+  setTradeStatus("下单中…");
+  try {
+    const resp = await fetch("/api/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instId: inst, side, sz }),
+    }).then(r => r.json());
+    if (resp.ok) {
+      setTradeStatus(`✅ 下单成功 (ordId=${resp.ordId})`, "success");
+      $("#trade-sz").value = "";
+    } else {
+      setTradeStatus(`❌ ${resp.error}`, "error");
+    }
+  } catch (exc) {
+    setTradeStatus(`❌ 网络错误: ${exc}`, "error");
+  }
+}
+
+function initTradePanel() {
+  const sel = $("#trade-inst");
+  sel.innerHTML = state.watchlist.map(i => `<option>${i}</option>`).join("");
+  sel.value = state.chartInst;
+  state.tradeSide = "buy";
+  sel.addEventListener("change", updateSzHint);
+  $("#side-buy").addEventListener("click", () => setSide("buy"));
+  $("#side-sell").addEventListener("click", () => setSide("sell"));
+  $("#trade-submit").addEventListener("click", submitOrder);
+  $("#trade-sz").addEventListener("keydown", (e) => { if (e.key === "Enter") submitOrder(); });
+  syncTradeGuard();
+  updateSzHint();
+}
+
 /* ---------- boot ---------- */
 async function boot() {
   const s = await fetch("/api/state").then(r => r.json());
   state.tickers = s.tickers; state.funding = s.funding; state.balance = s.balance;
   state.positions = s.positions; state.alerts = s.alerts; state.private = s.private;
+  state.trading = s.trading; state.mode = s.mode;
   state.watchlist = s.watchlist; state.defaultChartInst = s.watchlist[0];
   state.timeframes = s.timeframes;
   $("#mode-badge").textContent = s.mode.toUpperCase();
   $("#mode-badge").className = "badge " + (s.mode === "live" ? "live" : "demo");
   renderWatchlist(); renderAccount(); renderAlerts();
-  initChart();
+  initChart(); initPnlChart(); initTradePanel();
   connectWs();
 }
 

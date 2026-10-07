@@ -31,17 +31,30 @@
     </table>
   </section>
 
-  <section class="panel" id="chart-panel">
-    <h2>观星图 · K线
-      <span class="chart-controls">
-        <select id="bar-select"></select>
-        <select id="inst-select"></select>
-      </span>
-    </h2>
-    <div id="chart"></div>
-  </section>
 
   <div class="column">
+    <section class="panel" id="trade-panel">
+      <h2>司南 · Trade <span id="trade-guard" class="badge off">TRADING OFF</span></h2>
+      <div id="trade-form">
+        <div class="trade-row">
+          <select id="trade-inst"></select>
+          <div class="side-toggle">
+            <button id="side-buy" class="active">买入</button><button id="side-sell">卖出</button>
+          </div>
+        </div>
+        <div class="trade-row">
+          <input id="trade-sz" type="text" placeholder="数量" autocomplete="off">
+          <button id="trade-submit">市价下单</button>
+        </div>
+        <p id="sz-hint" class="muted">现货：币数量（如 0.01）；合约：张数</p>
+        <p id="trade-status" class="muted"></p>
+      </div>
+      <div id="trade-disabled" class="guide hidden">
+        <p>交易功能未开启。确认风险后，在 <code>.env</code> 中设置 <code>OKX_TRADING_ENABLED=1</code> 并重启服务。</p>
+        <p>⚠️ 下单将直接发送到 OKX（当前模式：<span id="trade-mode">DEMO</span>）。请先用小数量在模拟盘验证。</p>
+      </div>
+    </section>
+
     <section class="panel" id="account-panel">
       <h2>司天监 · Account</h2>
       <div id="account-guide" class="guide hidden">
@@ -52,6 +65,7 @@
         <div class="equity-row">
           <span>USDT 权益</span><strong id="equity">—</strong>
         </div>
+        <div id="pnl-chart"></div>
         <table id="positions">
           <thead><tr><th>合约</th><th>方向</th><th>数量</th><th>开仓价</th><th>未实现盈亏</th></tr></thead>
           <tbody></tbody>
@@ -65,6 +79,23 @@
       <ul id="alerts"><li class="muted">尚无异动</li></ul>
     </section>
   </div>
+  <section class="panel" id="chart-panel">
+    <h2>观星图 · K线
+      <span class="chart-controls">
+        <select id="bar-select"></select>
+        <select id="inst-select"></select>
+      </span>
+    </h2>
+    <div id="signal-bar" class="hidden">
+      <span class="signal-badge" id="sig-ma5">MA5 —</span>
+      <span class="signal-badge" id="sig-ma20">MA20 —</span>
+      <span class="signal-badge" id="sig-rsi">RSI —</span>
+      <span class="signal-badge" id="sig-boll">%B —</span>
+      <span class="signal-badge action hold" id="sig-action">—</span>
+      <span class="disclaimer">信号仅供做 T 参考 · 非投资建议</span>
+    </div>
+    <div id="chart"></div>
+  </section>
 </main>
 
 <footer>夜观天象，不改天命 · observe, don't predict · <a href="https://www.okx.com" target="_blank" rel="noopener">data: OKX v5</a></footer>

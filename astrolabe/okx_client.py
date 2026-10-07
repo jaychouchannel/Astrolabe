@@ -81,13 +81,15 @@ class OkxRestClient:
         return headers
 
     async def _request(self, method: str, path: str, params: dict | None = None,
-                       body: str = "") -> Any:
+                       json_body: dict | None = None) -> Any:
         request_path = path
         if params:
             query = "&".join(f"{k}={v}" for k, v in params.items())
             request_path = f"{path}?{query}"
+        body = json.dumps(json_body) if json_body is not None else ""
         resp = await self._client.request(
-            method, request_path, content=body if method == "POST" else None,
+            method, request_path,
+            content=body if json_body is not None else None,
             headers=self._headers(method, request_path, body),
         )
         if resp.status_code == 429:
@@ -157,19 +159,32 @@ class OkxRestClient:
             body["posSide"] = pos_side
         data = await self._request(
             "POST", "/api/v5/account/set-leverage",
-            body=json.dumps(body),
+            json_body=body,
         )
         return data[0]
 
-    async def place_order(self, inst_id: str, side: str, pos_side: str | None,
-                          sz: int, td_mode: str = "isolated") -> dict:
-        """Market order. Gate: raises unless OKX_TRADING_ENABLED=1."""
+    async def place_order(self, inst_id: str, side: str, pos_side_or_sz: str | None,
+                          sz: int | None = None, td_mode: str = "isolated") -> dict:
+        """Market order. Gate: raises unless OKX_TRADING_ENABLED=1.
+
+        Supports two call shapes:
+        - strategy swap mode: (inst_id, side, pos_side, sz, td_mode)
+        - generic order mode: (inst_id, side, sz_str)
+        """
         if not self.s.trading_enabled:
             raise OkxError("trading disabled: set OKX_TRADING_ENABLED=1")
-        payload = json.dumps(
-            self._order_body(inst_id, side, pos_side, sz, td_mode))
-        data = await self._request("POST", "/api/v5/trade/order", body=payload)
-        order = data[0]
-        if order.get("sCode") != "0":
-            raise OkxError(f"order rejected {order.get('sCode')}: {order.get('sMsg')}")
-        return order
+        if sz is None:
+            sz_str = str(pos_side_or_sz)
+            if inst_id.endswith("-SWAP"):
+                body = {"instId": inst_id, "tdMode": "cross", "side": side,
+                        "ordType": "market", "sz": sz_str}
+            else:
+                body = {"instId": inst_id, "tdMode": "cash", "side": side,
+                        "ordType": "market", "sz": sz_str, "tgtCcy": "base_ccy"}
+        else:
+            body = self._order_body(inst_id, side, pos_side_or_sz, sz, td_mode)
+        result = await self._request("POST", "/api/v5/trade/order", json_body=body)
+        entry = result[0] if result else {}
+        if str(entry.get("sCode", "0")) != "0":
+            raise OkxError(f"order rejected {entry.get('sCode')}: {entry.get('sMsg')}")
+        return entry
