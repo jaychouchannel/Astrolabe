@@ -22,6 +22,7 @@ from .datafeed import Datafeed
 from .okx_client import OkxRestClient
 from .signals import compute_signals
 from .storage import Storage
+from .strategy import StrategyRunner
 from .telegram_notifier import TelegramNotifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -35,6 +36,8 @@ storage = Storage(settings.db_path)
 engine = AlertEngine(settings)
 notifier = TelegramNotifier(settings)
 broadcaster = Broadcaster()
+
+runner: StrategyRunner | None = None
 
 state: dict = {
     "tickers": {},      # instId -> ticker dict
@@ -54,6 +57,16 @@ async def _push_alert(alert) -> None:
     await broadcaster.broadcast({"topic": "alert", "data": alert.as_dict()})
     if notifier.enabled:
         asyncio.create_task(notifier.send_alert(alert))
+
+
+async def _on_strategy_trade(trade: dict) -> None:
+    await broadcaster.broadcast({"topic": "strategy", "data": trade})
+    if notifier.enabled:
+        text = (f"🤖 观星执行 {trade['action'].upper()} {trade['direction']} "
+                f"{trade['sz']}张 @ {trade['px']} (信号:{trade['signal']})")
+        if trade["pnl"]:
+            text += f" 已实现盈亏:{trade['pnl']:+.2f} USDT"
+        await notifier.send(text)
 
 
 async def handle_event(channel: str, item: dict) -> None:
@@ -141,12 +154,25 @@ async def _seed_state() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global runner
+    if settings.strategy_enabled:
+        if not settings.simulated and not settings.allow_live:
+            log.warning("策略未启动:实盘需 STRATEGY_ALLOW_LIVE=1")
+        else:
+            runner = StrategyRunner(settings, rest, storage, on_trade=_on_strategy_trade)
+            try:
+                await runner.start()
+            except Exception:
+                log.exception("strategy runner failed to start")
+                runner = None
     await _seed_state()
     feed = Datafeed(settings, handle_event)
     await feed.start()
     log.info("Astrolabe 夜观天象 started — mode=%s private=%s watchlist=%s",
              state["mode"], state["private"], settings.watchlist)
     yield
+    if runner:
+        await runner.stop()
     await feed.stop()
     await rest.close()
     await notifier.close()
@@ -206,6 +232,20 @@ async def api_signals(instId: str, bar: str = "1m") -> JSONResponse:
     result = compute_signals(candles)
     _signals_cache[key] = (now, result)
     return JSONResponse(result)
+
+
+@app.get("/api/strategy")
+async def api_strategy() -> JSONResponse:
+    """观星执行状态 — 模拟盘小游戏,非投资建议。"""
+    if runner is None:
+        return JSONResponse({
+            "enabled": False,
+            "tradingEnabled": settings.trading_enabled,
+            "reason": "STRATEGY_ENABLED=0 或实盘未授权 (STRATEGY_ALLOW_LIVE)"})
+    payload = runner.status()
+    payload["tradingEnabled"] = settings.trading_enabled
+    payload["recentTrades"] = storage.recent_trades(20)
+    return JSONResponse(payload)
 
 
 @app.get("/api/alerts")
