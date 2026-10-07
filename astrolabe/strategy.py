@@ -59,6 +59,7 @@ class StrategyRunner:
         self.min_sz = 1.0
         self._task: asyncio.Task | None = None
         self._stopping = False
+        self._need_reconcile = False
 
     # ---- lifecycle ----
     async def start(self) -> None:
@@ -69,10 +70,18 @@ class StrategyRunner:
             try:
                 self.pos_mode = (await self.rest.account_config()).get(
                     "posMode", "net_mode")
-                await self.rest.set_leverage(
-                    self.s.strategy_inst, str(self.s.strategy_lever))
+                if self.pos_mode == "long_short_mode":
+                    # OKX v5: posSide is required for set-leverage in
+                    # long/short mode + isolated margin.
+                    for ps in ("long", "short"):
+                        await self.rest.set_leverage(
+                            self.s.strategy_inst, str(self.s.strategy_lever),
+                            pos_side=ps)
+                else:
+                    await self.rest.set_leverage(
+                        self.s.strategy_inst, str(self.s.strategy_lever))
             except OkxError as exc:
-                log.warning("account setup degraded, assuming net mode: %s", exc)
+                log.warning("leverage setup failed: %s", exc)
         await self._reconcile()
         self._stopping = False
         self._task = asyncio.create_task(self._run())
@@ -94,6 +103,9 @@ class StrategyRunner:
                 await self.step()
             except Exception:
                 log.exception("strategy step failed")
+                # step outcome unknown (e.g. order sent but result lost) —
+                # force a reconcile before the next decision.
+                self._need_reconcile = True
             await asyncio.sleep(self.s.strategy_poll_s)
 
     # ---- decision ----
@@ -104,6 +116,11 @@ class StrategyRunner:
 
     async def on_signal(self, signal: dict) -> None:
         self.last_signal = signal
+        if self._need_reconcile:
+            # a previous order's outcome is unknown — sync with the real
+            # position before making any new decision.
+            self._need_reconcile = False
+            await self._reconcile()
         if signal.get("action", "hold") == "hold":
             return  # hold = do nothing; only a reversal signal closes the position
         if time.time() - self.last_trade_ts < self.s.strategy_cooldown_s:
@@ -114,9 +131,15 @@ class StrategyRunner:
             return
         price = float((await self.rest.ticker(self.s.strategy_inst))["last"])
         for act in actions:
-            await self._execute(act, signal, price)
+            if not await self._execute(act, signal, price):
+                break  # e.g. reversal close failed — never open on top of it
 
-    async def _execute(self, act: dict, signal: dict, price: float) -> None:
+    async def _execute(self, act: dict, signal: dict, price: float) -> bool:
+        """Run one action; True on success, False on any failure.
+
+        False lets on_signal abort the remaining actions of a multi-step
+        plan (e.g. a failed reversal close must never be followed by open).
+        """
         direction = act["direction"]
         side = "buy" if (direction == "long") == (act["action"] == "open") else "sell"
         if act["action"] == "open":
@@ -143,7 +166,14 @@ class StrategyRunner:
                                      "sz": sz, "px": price, "usdtNotional": 0.0,
                                      "signal": signal.get("action", ""), "pnl": 0.0})
             self.last_trade_ts = time.time()  # back off via cooldown on failure
-            return
+            return False
+        except Exception:
+            # timeout / connection drop: the order may or may not exist on
+            # the exchange. Block trading until the next reconcile.
+            log.exception("order outcome unknown (%s %s), will reconcile",
+                          act["action"], direction)
+            self._need_reconcile = True
+            return False
         px = float(result.get("avgPx") or price)
         notional = px * sz * self.ct_val
         pnl = 0.0
@@ -170,6 +200,7 @@ class StrategyRunner:
                                  "px": trade["px"],
                                  "usdtNotional": trade["usdt_notional"],
                                  "signal": trade["signal"], "pnl": trade["pnl"]})
+        return True
 
     # ---- state ----
     async def _reconcile(self) -> None:

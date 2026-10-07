@@ -148,10 +148,16 @@ class OkxRestClient:
         return data[0]
 
     async def set_leverage(self, inst_id: str, lever: str,
-                           mgn_mode: str = "isolated") -> dict:
+                           mgn_mode: str = "isolated",
+                           pos_side: str | None = None) -> dict:
+        """Set leverage. posSide is required by OKX v5 in long/short mode
+        combined with isolated margin."""
+        body: dict = {"instId": inst_id, "lever": lever, "mgnMode": mgn_mode}
+        if pos_side:
+            body["posSide"] = pos_side
         data = await self._request(
             "POST", "/api/v5/account/set-leverage",
-            body=json.dumps({"instId": inst_id, "lever": lever, "mgnMode": mgn_mode}),
+            body=json.dumps(body),
         )
         return data[0]
 

@@ -34,14 +34,20 @@ class FakeRest:
         self.positions_data = positions or []
         self.orders: list[dict] = []
         self.fail_next_order = False
+        self.raise_timeout = False
+        self.leverage_calls: list[dict] = []
+        self.pos_mode = "net_mode"
 
     async def instruments(self, inst_id: str) -> dict:
         return {"ctVal": "0.01", "minSz": "1"}
 
     async def account_config(self) -> dict:
-        return {"posMode": "net_mode"}
+        return {"posMode": self.pos_mode}
 
-    async def set_leverage(self, inst_id: str, lever: str, mgn_mode: str = "isolated") -> dict:
+    async def set_leverage(self, inst_id: str, lever: str, mgn_mode: str = "isolated",
+                           pos_side: str | None = None) -> dict:
+        self.leverage_calls.append({"instId": inst_id, "lever": lever,
+                                    "mgnMode": mgn_mode, "posSide": pos_side})
         return {"sCode": "0"}
 
     async def candles(self, inst_id: str, bar: str, limit: int = 100) -> list[list]:
@@ -55,6 +61,8 @@ class FakeRest:
 
     async def place_order(self, inst_id: str, side: str, pos_side: str | None,
                           sz: int, td_mode: str = "isolated") -> dict:
+        if self.raise_timeout:
+            raise TimeoutError("boom")
         if self.fail_next_order:
             self.fail_next_order = False
             raise OkxError("order rejected 51000: insufficient funds")
@@ -140,6 +148,52 @@ def test_order_failure_records_error(tmp_path):
     assert rest.orders == [] and runner.side is None
     trades = runner.storage.recent_trades()
     assert len(trades) == 1 and trades[0]["action"] == "error"
+
+
+def test_close_failure_aborts_open(tmp_path):
+    # reversal = [close, open]; if the close fails the open must not fire,
+    # otherwise the exchange ends up with both positions.
+    runner, rest = make_runner(DOWNTREND, tmp_path)
+    asyncio.run(runner.step())  # open long
+    rest.candles_data = UPTREND
+    runner.last_trade_ts = 0.0
+    rest.fail_next_order = True  # next order = the close -> fails
+    asyncio.run(runner.step())
+    assert len(rest.orders) == 1  # only the original buy; no orphan open
+    assert runner.side == "long"  # state machine untouched
+    trades = runner.storage.recent_trades()
+    assert any(t["action"] == "error" for t in trades)
+
+
+def test_unknown_outcome_triggers_reconcile(tmp_path):
+    runner, rest = make_runner(DOWNTREND, tmp_path)
+    rest.raise_timeout = True
+    asyncio.run(runner.step())
+    assert runner._need_reconcile is True
+    assert rest.orders == []  # nothing recorded, nothing retried blindly
+    # next cycle: reconcile first, then adopt the real position instead of
+    # re-sending the same open (which would double the position)
+    rest.raise_timeout = False
+    rest.positions_data = [
+        {"instId": "BTC-USDT-SWAP", "pos": "1", "avgPx": "120000"}]
+    asyncio.run(runner.step())
+    assert runner.side == "long"
+    assert runner.sz == 1
+    assert rest.orders == []  # reconcile adopted the position; no duplicate open
+
+
+def test_set_leverage_long_short_mode(tmp_path):
+    # OKX v5 requires posSide for set-leverage in long/short + isolated mode
+    runner, rest = make_runner(FLAT, tmp_path, api_key="k", secret_key="s",
+                               passphrase="p")
+    rest.pos_mode = "long_short_mode"
+
+    async def run():
+        await runner.start()
+        await runner.stop()
+
+    asyncio.run(run())
+    assert [c["posSide"] for c in rest.leverage_calls] == ["long", "short"]
 
 
 def test_reconcile_from_positions(tmp_path):

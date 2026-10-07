@@ -12,9 +12,10 @@
 学习娱乐,非投资建议。
 
 An OKX quant monitoring dashboard: real-time tickers, candlesticks, funding rates,
-your positions & equity, plus Telegram alerts on market anomalies. **Observe, don't trade.**
+your positions & equity, plus Telegram alerts on market anomalies. **Trading is
+opt-in and gated** (see the three switches above).
 
-![mode](https://img.shields.io/badge/mode-observe--only-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+![mode](https://img.shields.io/badge/trading-opt--in__gates-yellow) ![license](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features 特性
 
