@@ -42,10 +42,24 @@ class OkxError(RuntimeError):
     pass
 
 
+def calc_contracts(margin_usdt: float, lever: int, price: float,
+                   ct_val: float, min_sz: float) -> int:
+    """Swap contracts for a margin budget at leverage; never below minSz.
+
+    One contract is worth price * ctVal; a small budget can't fill even one
+    contract, in which case we still trade minSz and record the real notional.
+    """
+    notional = margin_usdt * lever
+    if price <= 0 or ct_val <= 0:
+        return int(min_sz)
+    return max(int(min_sz), int(notional / (price * ct_val)))
+
+
 class OkxRestClient:
     def __init__(self, settings) -> None:
         self.s = settings
         self._client = httpx.AsyncClient(base_url=REST_BASE, timeout=15)
+        self._instruments: dict[str, dict] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -66,9 +80,9 @@ class OkxRestClient:
             headers["x-simulated-trading"] = "1"
         return headers
 
-    async def _request(self, method: str, path: str, params: dict | None = None) -> Any:
+    async def _request(self, method: str, path: str, params: dict | None = None,
+                       body: str = "") -> Any:
         request_path = path
-        body = ""
         if params:
             query = "&".join(f"{k}={v}" for k, v in params.items())
             request_path = f"{path}?{query}"
@@ -109,3 +123,47 @@ class OkxRestClient:
 
     async def positions(self) -> list[dict]:
         return await self._request("GET", "/api/v5/account/positions", {"instType": "SWAP"})
+
+    def _order_body(self, inst_id: str, side: str, pos_side: str | None,
+                    sz: int, td_mode: str = "isolated") -> dict:
+        body: dict = {"instId": inst_id, "tdMode": td_mode, "side": side,
+                      "ordType": "market", "sz": str(sz)}
+        if pos_side:
+            body["posSide"] = pos_side
+        return body
+
+    async def instruments(self, inst_id: str) -> dict:
+        """Instrument spec (ctVal/minSz), cached for the process lifetime."""
+        if inst_id in self._instruments:
+            return self._instruments[inst_id]
+        data = await self._request(
+            "GET", "/api/v5/public/instruments",
+            {"instType": "SWAP", "instId": inst_id},
+        )
+        self._instruments[inst_id] = data[0]
+        return data[0]
+
+    async def account_config(self) -> dict:
+        data = await self._request("GET", "/api/v5/account/config")
+        return data[0]
+
+    async def set_leverage(self, inst_id: str, lever: str,
+                           mgn_mode: str = "isolated") -> dict:
+        data = await self._request(
+            "POST", "/api/v5/account/set-leverage",
+            body=json.dumps({"instId": inst_id, "lever": lever, "mgnMode": mgn_mode}),
+        )
+        return data[0]
+
+    async def place_order(self, inst_id: str, side: str, pos_side: str | None,
+                          sz: int, td_mode: str = "isolated") -> dict:
+        """Market order. Gate: raises unless OKX_TRADING_ENABLED=1."""
+        if not self.s.trading_enabled:
+            raise OkxError("trading disabled: set OKX_TRADING_ENABLED=1")
+        payload = json.dumps(
+            self._order_body(inst_id, side, pos_side, sz, td_mode))
+        data = await self._request("POST", "/api/v5/trade/order", body=payload)
+        order = data[0]
+        if order.get("sCode") != "0":
+            raise OkxError(f"order rejected {order.get('sCode')}: {order.get('sMsg')}")
+        return order
