@@ -3,12 +3,19 @@
 **OKX market & account monitoring dashboard** — watch the stars, watch the market.
 
 夜观天象，是一台「观测市场的星盘」：实时展示 OKX 公开行情与你自己的账户持仓盈亏，
-并在行情异动时通过 Telegram 推送。**只观测，不下单** —— 无任何交易权限，安全开箱即用。
+并在行情异动时通过 Telegram 推送。
+
+**默认只观测，不下单** —— 所有交易能力默认关闭,安全开箱即用。可选的
+「观星执行」策略模块在 `OKX_TRADING_ENABLED=1` + `STRATEGY_ENABLED=1`
+(+ 实盘还需 `STRATEGY_ALLOW_LIVE=1`) 三道闸门全部打开后,才会把做T信号
+转成 BTC-USDT-SWAP 市价单,推荐配合 `OKX_SIMULATED=1` 模拟盘使用。仅供
+学习娱乐,非投资建议。
 
 An OKX quant monitoring dashboard: real-time tickers, candlesticks, funding rates,
-your positions & equity, plus Telegram alerts on market anomalies. **Observe, don't trade.**
+your positions & equity, plus Telegram alerts on market anomalies. **Trading is
+opt-in and gated** (see the three switches above).
 
-![mode](https://img.shields.io/badge/mode-observe--only-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+![mode](https://img.shields.io/badge/trading-opt--in__gates-yellow) ![license](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features 特性
 

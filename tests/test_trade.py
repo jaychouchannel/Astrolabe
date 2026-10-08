@@ -21,7 +21,8 @@ def test_trading_enabled_via_env(monkeypatch):
 
 
 def _client_with_handler(handler):
-    s = Settings(api_key="k", secret_key="sec", passphrase="p", simulated=True)
+    s = Settings(api_key="k", secret_key="sec", passphrase="p",
+                 simulated=True, trading_enabled=True)
     c = OkxRestClient(s)
     c._client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url=REST_BASE
